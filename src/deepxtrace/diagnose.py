@@ -117,6 +117,7 @@ class Diagnose:
         DEEPEP_DIAGNOSE_THRESHOLD_COL: determine threshold for abnormal columns. Default 3.0.
         DEEPEP_DIAGNOSE_THRESHOLD_ROW: determine threshold for abnormal rows. Default 3.0.
         DEEPEP_DIAGNOSE_THRESHOLD_POINT: determine threshold for abnormal individual points. Default 5.0.
+        DEEPEP_DIAGNOSE_EXCLUDING_ZEROS: controls whether excluding zeros in diagnose_matrix. Default 0.
 
     """
 
@@ -161,6 +162,8 @@ class Diagnose:
             os.getenv(
                 "DEEPEP_DIAGNOSE_THRESHOLD_POINT",
                 5.0))
+        self.excluding_zeros = int(
+            os.getenv("DEEPEP_DIAGNOSE_EXCLUDING_ZEROS", 0))
 
         # Initialize the diagnose
         self.group = group
@@ -306,7 +309,7 @@ class Diagnose:
     @staticmethod
     def diagnose_matrix(
         mat, thres_col=3.0, thres_row=3.0, thres_point=5.0,
-        suppress_points_in_strong_rowscols=True
+        suppress_points_in_strong_rowscols=True, excluding_zeros=0
     ):
         """
         Detect abnormal columns, rows, and individual points in a 2D wait-time matrix.
@@ -344,8 +347,17 @@ class Diagnose:
         ]
 
         # 3. Check for abnormal single points
-        # z_all = (mat - mat.mean()) / (mat.std() + 1e-8)
-        z_all = mat / (mat.mean() + 1e-8)
+        if excluding_zeros == 0:
+            # z_all = (mat - mat.mean()) / (mat.std() + 1e-8)
+            z_all = mat / (mat.mean() + 1e-8)
+        elif excluding_zeros == 1:
+            nonzero_values = mat[mat != 0]
+            if len(nonzero_values) > 0:
+                mean_val = nonzero_values.mean()
+                z_all = mat / (mean_val + 1e-8)
+            else:
+                z_all = mat
+
         # Get all positions with z-score > threshold
         abnormal_points = [
             [i, j, mat[i, j], z_all[i, j]]
@@ -362,6 +374,7 @@ class Diagnose:
                 [i, j, v, z] for [i, j, v, z] in abnormal_points
                 if i not in strong_rows and j not in strong_cols
             ]
+
         # 4. Return for automatic processing
         return {
             "abnormal_cols": abnormal_cols,
@@ -436,7 +449,7 @@ class Diagnose:
                 stats_arr = torch.stack(self.gather_tensor, dim=0).numpy()
             for i, name in enumerate(["Dispatch", "Combine"]):
                 res = Diagnose.diagnose_matrix(
-                    stats_arr[:, i, :], thres_col=self.thres_col, thres_row=self.thres_row, thres_point=self.thres_point)
+                    stats_arr[:, i, :], thres_col=self.thres_col, thres_row=self.thres_row, thres_point=self.thres_point, excluding_zeros=self.excluding_zeros)
                 results.append(res)
                 self.logger.info(
                     f"[Diagnose] InstanceID: {self.instance_id} EPSize: {self.group_size}, diagnose: {res}, {name} Wait Recv Cost Per Token Matrix[src_rank, dst_rank]")
